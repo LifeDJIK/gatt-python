@@ -463,6 +463,20 @@ class Device:
         # To be implemented by subclass
         pass
 
+    def descriptor_write_value_succeeded(self, descriptor):
+        """
+        Called when a descriptor value write command succeeded.
+        """
+        # To be implemented by subclass
+        pass
+
+    def descriptor_write_value_failed(self, descriptor, error):
+        """
+        Called when a descriptor value write command failed.
+        """
+        # To be implemented by subclass
+        pass
+
 
 class Service:
     """
@@ -539,6 +553,41 @@ class Descriptor:
         except dbus.exceptions.DBusException as e:
             error = _error_from_dbus_error(e)
             self.service.device.descriptor_read_value_failed(self, error=error)
+
+    def write_value(self, value, offset=0):
+        """
+        Attempts to write a value to the descriptor.
+
+        Success or failure will be notified by calls to `write_value_succeeded` or `write_value_failed` respectively.
+
+        :param value: array of bytes to be written
+        :param offset: offset from where to start writing the bytes (defaults to 0)
+        """
+        bytes = [dbus.Byte(b) for b in value]
+
+        try:
+            self._object.WriteValue(
+                bytes,
+                {'offset': dbus.UInt16(offset, variant_level=1)},
+                reply_handler=self._write_value_succeeded,
+                error_handler=self._write_value_failed,
+                dbus_interface='org.bluez.GattDescriptor1')
+        except dbus.exceptions.DBusException as e:
+            error = _error_from_dbus_error(e)
+            self._write_value_failed(self, error=error)
+
+    def _write_value_succeeded(self):
+        """
+        Called when the write request has succeeded.
+        """
+        self.service.device.descriptor_write_value_succeeded(descriptor=self)
+
+    def _write_value_failed(self, dbus_error):
+        """
+        Called when the write request has failed.
+        """
+        error = _error_from_dbus_error(dbus_error)
+        self.service.device.descriptor_write_value_failed(descriptor=self, error=error)
 
 
 class Characteristic:
