@@ -491,8 +491,12 @@ class Service:
         self._bus = device._bus
         self._object_manager = device._object_manager
         self._object = self._bus.get_object('org.bluez', self._path)
+        self._properties = dbus.Interface(self._object, "org.freedesktop.DBus.Properties")
         self.characteristics = []
         self.characteristics_resolved()
+
+    def get_properties(self):
+        return self._properties.GetAll("org.bluez.GattService1")
 
     def _connect_signals(self):
         self._connect_characteristic_signals()
@@ -537,6 +541,10 @@ class Descriptor:
         self._bus = characteristic._bus
         self._path = path
         self._object = self._bus.get_object('org.bluez', self._path)
+        self._properties = dbus.Interface(self._object, "org.freedesktop.DBus.Properties")
+
+    def get_properties(self):
+        return self._properties.GetAll("org.bluez.GattDescriptor1")
 
     def read_value(self, offset=0):
         """
@@ -552,7 +560,7 @@ class Descriptor:
             return val
         except dbus.exceptions.DBusException as e:
             error = _error_from_dbus_error(e)
-            self.service.device.descriptor_read_value_failed(self, error=error)
+            self.characteristic.service.device.descriptor_read_value_failed(self, error=error)
 
     def write_value(self, value, offset=0):
         """
@@ -573,21 +581,20 @@ class Descriptor:
                 error_handler=self._write_value_failed,
                 dbus_interface='org.bluez.GattDescriptor1')
         except dbus.exceptions.DBusException as e:
-            error = _error_from_dbus_error(e)
-            self._write_value_failed(self, error=error)
+            self._write_value_failed(e)
 
     def _write_value_succeeded(self):
         """
         Called when the write request has succeeded.
         """
-        self.service.device.descriptor_write_value_succeeded(descriptor=self)
+        self.characteristic.service.device.descriptor_write_value_succeeded(descriptor=self)
 
     def _write_value_failed(self, dbus_error):
         """
         Called when the write request has failed.
         """
         error = _error_from_dbus_error(dbus_error)
-        self.service.device.descriptor_write_value_failed(descriptor=self, error=error)
+        self.characteristic.service.device.descriptor_write_value_failed(descriptor=self, error=error)
 
 
 class Characteristic:
@@ -612,6 +619,9 @@ class Characteristic:
             for desc in self._object_manager.GetManagedObjects().items()
             if descriptor_regex.match(desc[0])
         ]
+
+    def get_properties(self):
+        return self._properties.GetAll("org.bluez.GattCharacteristic1")
 
     def _connect_signals(self):
         if self._properties_signal is None:
@@ -645,7 +655,7 @@ class Characteristic:
             error = _error_from_dbus_error(e)
             self.service.device.characteristic_read_value_failed(self, error=error)
 
-    def write_value(self, value, offset=0):
+    def write_value(self, value, offset=0, write_type=None):
         """
         Attempts to write a value to the characteristic.
 
@@ -657,14 +667,21 @@ class Characteristic:
         bytes = [dbus.Byte(b) for b in value]
 
         try:
+            opts = {
+                'offset': dbus.UInt16(offset, variant_level=1),
+            }
+            #
+            if write_type is not None:
+                opts["type"] = dbus.String(write_type)
+            #
             self._object.WriteValue(
                 bytes,
-                {'offset': dbus.UInt16(offset, variant_level=1)},
+                opts,
                 reply_handler=self._write_value_succeeded,
                 error_handler=self._write_value_failed,
                 dbus_interface='org.bluez.GattCharacteristic1')
         except dbus.exceptions.DBusException as e:
-            self._write_value_failed(self, error=e)
+            self._write_value_failed(e)
 
     def _write_value_succeeded(self):
         """
@@ -701,7 +718,7 @@ class Characteristic:
                     error_handler=self._enable_notifications_failed,
                     dbus_interface='org.bluez.GattCharacteristic1')
         except dbus.exceptions.DBusException as e:
-            self._enable_notifications_failed(error=e)
+            self._enable_notifications_failed(e)
 
     def _enable_notifications_succeeded(self):
         """
